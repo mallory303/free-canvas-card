@@ -298,18 +298,192 @@
       }
     }
 
+    // ---- HA native card picker ----
+
+    _fireEvent(node, type, detail, options) {
+      options = options || {};
+      var event = new CustomEvent(type, {
+        detail: detail,
+        bubbles: options.bubbles !== undefined ? options.bubbles : true,
+        cancelable: options.cancelable !== undefined ? options.cancelable : true,
+        composed: options.composed !== undefined ? options.composed : true,
+      });
+      node.dispatchEvent(event);
+    }
+
+    _openHACardPicker() {
+      var self = this;
+      // Build a list of available card types from HA's registered customCards
+      // and built-in cards
+      var builtInCards = [
+        { type: "entities", name: "Entities", description: "List of entities" },
+        { type: "gauge", name: "Gauge", description: "Single value gauge" },
+        { type: "sensor", name: "Sensor", description: "Simple sensor card" },
+        { type: "picture", name: "Picture", description: "Image card" },
+        { type: "picture-entity", name: "Picture Entity", description: "Image from entity" },
+        { type: "picture-glance", name: "Picture Glance", description: "Image with entity icons" },
+        { type: "picture-elements", name: "Picture Elements", description: "Image with overlays" },
+        { type: "thermostat", name: "Thermostat", description: "Climate control" },
+        { type: "history-graph", name: "History Graph", description: "History chart" },
+        { type: "statistics-graph", name: "Statistics Graph", description: "Statistics chart" },
+        { type: "markdown", name: "Markdown", description: "Rich text card" },
+        { type: "horizontal-stack", name: "Horizontal Stack", description: "Stack cards horizontally" },
+        { type: "vertical-stack", name: "Vertical Stack", description: "Stack cards vertically" },
+        { type: "grid", name: "Grid", description: "Grid layout" },
+        { type: "conditional", name: "Conditional", description: "Show based on conditions" },
+        { type: "button", name: "Button", description: "Action button" },
+        { type: "iframe", name: "iFrame", description: "Embed webpage" },
+        { type: "map", name: "Map", description: "Map with zones" },
+        { type: "light", name: "Light", description: "Light control" },
+        { type: "media-control", name: "Media Control", description: "Media player control" },
+        { type: "alarm-panel", name: "Alarm Panel", description: "Alarm control" },
+        { type: "climate", name: "Climate", description: "Climate control" },
+        { type: "cover", name: "Cover", description: "Blind/cover control" },
+        { type: "fan", name: "Fan", description: "Fan control" },
+        { type: "humidifier", name: "Humidifier", description: "Humidifier control" },
+        { type: "water-heater", name: "Water Heater", description: "Water heater control" },
+        { type: "lock", name: "Lock", description: "Lock control" },
+        { type: "vacuum", name: "Vacuum", description: "Vacuum control" },
+        { type: "lawn-mower", name: "Lawn Mower", description: "Lawn mower control" },
+        { type: "logbook", name: "Logbook", description: "Activity log" },
+        { type: "glance", name: "Glance", description: "Compact entity list" },
+        { type: "tile", name: "Tile", description: "Tile card" },
+        { type: "heading", name: "Heading", description: "Section heading" },
+      ];
+
+      // Add custom cards from window.customCards
+      var customCards = [];
+      if (window.customCards) {
+        customCards = window.customCards.map(function (c) {
+          return { type: c.type, name: c.name, description: c.description || "Custom card", custom: true };
+        });
+      }
+
+      // Merge and deduplicate
+      var allCards = builtInCards.concat(customCards);
+      var seen = {};
+      allCards = allCards.filter(function (c) {
+        if (seen[c.type]) return false;
+        seen[c.type] = true;
+        return true;
+      });
+
+      self._showCardPicker(allCards);
+    }
+
+    _showCardPicker(cards) {
+      var self = this;
+      var root = self._container;
+
+      // Build the picker overlay
+      var overlay = document.createElement("div");
+      overlay.className = "fc-dialog-overlay";
+
+      var dialog = document.createElement("div");
+      dialog.className = "fc-dialog";
+      dialog.style.maxWidth = "700px";
+
+      var title = document.createElement("h3");
+      title.textContent = "Pick a Card";
+      title.style.margin = "0 0 12px 0";
+      dialog.appendChild(title);
+
+      var search = document.createElement("input");
+      search.type = "text";
+      search.placeholder = "Search cards...";
+      search.style.cssText = "width:100%;box-sizing:border-box;padding:10px 14px;margin-bottom:14px;border-radius:8px;border:1px solid var(--divider-color,#444);background:var(--secondary-background-color,#111);color:var(--primary-text-color,#fff);font-size:14px;";
+      dialog.appendChild(search);
+
+      var grid = document.createElement("div");
+      grid.style.cssText = "display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;max-height:400px;overflow-y:auto;";
+      dialog.appendChild(grid);
+
+      function renderCards(filter) {
+        grid.innerHTML = "";
+        cards.forEach(function (c) {
+          if (filter && c.name.toLowerCase().indexOf(filter.toLowerCase()) === -1 && c.type.toLowerCase().indexOf(filter.toLowerCase()) === -1) return;
+          var card = document.createElement("div");
+          card.style.cssText = "padding:12px;border-radius:8px;cursor:pointer;border:1px solid var(--divider-color,#444);background:var(--secondary-background-color,#1a1a1a);transition:background 0.15s;";
+          card.onmouseenter = function () { card.style.background = "var(--primary-color,#03a9f4)"; card.style.opacity = "0.8"; };
+          card.onmouseleave = function () { card.style.background = "var(--secondary-background-color,#1a1a1a)"; card.style.opacity = "1"; };
+          card.innerHTML =
+            '<div style="font-weight:600;font-size:14px;margin-bottom:4px;">' + c.name + '</div>' +
+            '<div style="font-size:11px;color:var(--secondary-text-color,#888);">' + c.description + '</div>' +
+            '<div style="font-size:10px;color:var(--secondary-text-color,#555);margin-top:4px;font-family:monospace;">' + c.type + '</div>' +
+            (c.custom ? '<div style="font-size:9px;color:var(--primary-color,#03a9f4);margin-top:2px;">CUSTOM</div>' : '');
+          card.onclick = function () {
+            overlay.remove();
+            // Create a default config for this card type
+            var config = { type: c.type };
+            if (c.type === "entities") config.entities = [];
+            if (c.type === "gauge") { config.entity = ""; config.min = 0; config.max = 100; }
+            if (c.type === "sensor") config.entity = "";
+            if (c.type === "markdown") config.content = "# Markdown\nEdit this text";
+            if (c.type === "button") { config.entity = ""; config.name = ""; }
+            if (c.type === "iframe") config.url = "https://example.com";
+            if (c.type === "picture") config.image = "https://example.com/image.png";
+            if (c.type === "history-graph") { config.entities = []; config.hours_to_show = 24; }
+            if (c.type === "horizontal-stack" || c.type === "vertical-stack" || c.type === "grid") config.cards = [];
+            if (c.type === "conditional") { config.conditions = []; config.card = {}; };
+            if (c.type === "glance") config.entities = [];
+            if (c.type === "tile") config.entity = "";
+            if (c.type === "logbook") { config.entities = []; };
+            // Now open the JSON editor with this default config
+            self._dialogMode = "add";
+            self._editingItemId = null;
+            self._cardConfigText = JSON.stringify(config, null, 2);
+            self._showDialog = true;
+            self._render();
+          };
+          grid.appendChild(card);
+        });
+      }
+      renderCards("");
+
+      search.addEventListener("input", function (e) { renderCards(e.target.value); });
+      search.focus();
+
+      overlay.addEventListener("pointerdown", function (e) {
+        if (e.target === overlay) overlay.remove();
+      });
+
+      var buttons = document.createElement("div");
+      buttons.className = "fc-dialog-buttons";
+      var cancelBtn = document.createElement("button");
+      cancelBtn.className = "fc-secondary";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.onclick = function () { overlay.remove(); };
+      buttons.appendChild(cancelBtn);
+      dialog.appendChild(buttons);
+
+      overlay.appendChild(dialog);
+      root.appendChild(overlay);
+    }
+
     // ---- Add / Edit / Delete ----
 
     _openAddDialog() {
-      this._dialogMode = "add";
-      this._editingItemId = null;
-      this._cardConfigText = JSON.stringify({
+      // Try HA native card picker first; fall back to JSON dialog
+      var self = this;
+      try {
+        self._openHACardPicker();
+      } catch (e) {
+        console.warn("[FreeCanvas] HA card picker failed, falling back to JSON:", e);
+        self._openAddDialogJSON();
+      }
+    }
+
+    _openAddDialogJSON() {
+      var self = this;
+      self._dialogMode = "add";
+      self._editingItemId = null;
+      self._cardConfigText = JSON.stringify({
         type: "entities",
         title: "New Card",
         entities: ["sensor.tp350s_a6e2_temperature"],
       }, null, 2);
-      this._showDialog = true;
-      this._render();
+      self._showDialog = true;
+      self._render();
     }
 
     _openEditDialog(item) {
@@ -603,6 +777,7 @@
         toolbar.className = "fc-toolbar";
         toolbar.innerHTML =
           '<button id="fc-btn-add">+ Add Card</button>' +
+          '<button class="fc-secondary" id="fc-btn-add-json">+ Add (JSON)</button>' +
           '<button class="fc-secondary" id="fc-btn-export">Export</button>' +
           '<button class="fc-secondary" id="fc-btn-import">Import</button>' +
           '<button class="fc-danger" id="fc-btn-reset">Reset</button>' +
@@ -612,6 +787,7 @@
         root.appendChild(toolbar);
 
         toolbar.querySelector("#fc-btn-add").onclick = function () { self._openAddDialog(); };
+        toolbar.querySelector("#fc-btn-add-json").onclick = function () { self._openAddDialogJSON(); };
         toolbar.querySelector("#fc-btn-export").onclick = function () { self._exportLayout(); };
         toolbar.querySelector("#fc-btn-import").onclick = function () { self._importLayout(); };
         toolbar.querySelector("#fc-btn-reset").onclick = function () { self._resetLayout(); };
