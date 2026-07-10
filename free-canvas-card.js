@@ -549,7 +549,6 @@
         case "thermostat":
         case "alarm-panel":
         case "media-control":
-        case "button":
           defaults.entity = this._guessEntity(type) || "";
           break;
         case "button":
