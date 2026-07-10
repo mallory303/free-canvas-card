@@ -126,6 +126,41 @@
       background: var(--primary-color, #03a9f4); color: #fff; border: none;
       border-radius: 8px; padding: 12px 24px; cursor: pointer; font-size: 16px;
     }
+        .fc-configurator {
+          display: flex; flex-direction: column; gap: 14px;
+        }
+        .fc-configurator .fc-field {
+          display: flex; flex-direction: column; gap: 6px;
+        }
+        .fc-configurator label {
+          font-size: 13px; font-weight: 500; color: var(--primary-text-color, #fff);
+        }
+        .fc-configurator input, .fc-configurator select {
+          width: 100%; box-sizing: border-box; padding: 10px 14px; border-radius: 8px;
+          border: 1px solid var(--divider-color, #444);
+          background: var(--secondary-background-color, #111);
+          color: var(--primary-text-color, #fff); font-size: 14px;
+        }
+        .fc-configurator select option {
+          background: var(--secondary-background-color, #111);
+          color: var(--primary-text-color, #fff);
+        }
+        .fc-configurator .fc-preview-box {
+          min-height: 120px; border: 1px dashed var(--divider-color, #444);
+          border-radius: 8px; padding: 12px; background: var(--ha-card-background, #222);
+          position: relative; overflow: hidden;
+        }
+        .fc-configurator .fc-raw-toggle {
+          display: flex; align-items: center; gap: 8px; font-size: 13px;
+          color: var(--secondary-text-color, #888); cursor: pointer;
+        }
+        .fc-configurator .fc-section-title {
+          font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+          color: var(--secondary-text-color, #888); margin-top: 4px;
+        }
+        .fc-configurator .fc-no-entity {
+          font-size: 12px; color: var(--secondary-text-color, #666);
+        }
   `;
 
   class FreeCanvasCard extends HTMLElement {
@@ -413,27 +448,8 @@
             (c.custom ? '<div style="font-size:9px;color:var(--primary-color,#03a9f4);margin-top:2px;">CUSTOM</div>' : '');
           card.onclick = function () {
             overlay.remove();
-            // Create a default config for this card type
-            var config = { type: c.type };
-            if (c.type === "entities") config.entities = [];
-            if (c.type === "gauge") { config.entity = ""; config.min = 0; config.max = 100; }
-            if (c.type === "sensor") config.entity = "";
-            if (c.type === "markdown") config.content = "# Markdown\nEdit this text";
-            if (c.type === "button") { config.entity = ""; config.name = ""; }
-            if (c.type === "iframe") config.url = "https://example.com";
-            if (c.type === "picture") config.image = "https://example.com/image.png";
-            if (c.type === "history-graph") { config.entities = []; config.hours_to_show = 24; }
-            if (c.type === "horizontal-stack" || c.type === "vertical-stack" || c.type === "grid") config.cards = [];
-            if (c.type === "conditional") { config.conditions = []; config.card = {}; };
-            if (c.type === "glance") config.entities = [];
-            if (c.type === "tile") config.entity = "";
-            if (c.type === "logbook") { config.entities = []; };
-            // Now open the JSON editor with this default config
-            self._dialogMode = "add";
-            self._editingItemId = null;
-            self._cardConfigText = JSON.stringify(config, null, 2);
-            self._showDialog = true;
-            self._render();
+            var defaults = self._getCardDefaults(c.type);
+            self._showCardConfigurator(c.type, c.name, defaults);
           };
           grid.appendChild(card);
         });
@@ -460,17 +476,471 @@
       root.appendChild(overlay);
     }
 
+    // ---- Card defaults / entity helpers ----
+
+    _entityDomainsForCardType(type) {
+      var map = {
+        sensor: ["sensor", "binary_sensor"],
+        gauge: ["sensor"],
+        tile: ["light", "switch", "sensor", "binary_sensor", "fan", "climate", "cover", "lock", "vacuum", "humidifier", "water_heater"],
+        button: ["button", "script", "scene", "automation"],
+        entities: ["sensor", "binary_sensor", "light", "switch", "climate", "cover", "fan", "lock", "vacuum", "media_player"],
+        glance: ["sensor", "binary_sensor", "light", "switch", "climate", "cover", "fan", "lock"],
+        "history-graph": ["sensor", "binary_sensor"],
+        logbook: ["sensor", "binary_sensor", "light", "switch"],
+        light: ["light"],
+        climate: ["climate"],
+        cover: ["cover"],
+        fan: ["fan"],
+        lock: ["lock"],
+        vacuum: ["vacuum"],
+        humidifier: ["humidifier"],
+        "water-heater": ["water_heater"],
+        "alarm-panel": ["alarm_control_panel"],
+        thermostat: ["climate"],
+        "media-control": ["media_player"],
+        map: ["person", "device_tracker", "zone"],
+        "picture-entity": ["light", "switch", "sensor", "person"],
+        "picture-glance": ["light", "switch", "sensor", "binary_sensor"],
+      };
+      return map[type] || null;
+    }
+
+    _getEntities(domainFilter) {
+      var hass = this._hass;
+      if (!hass || !hass.states) return [];
+      var all = [];
+      for (var id in hass.states) {
+        var parts = id.split(".");
+        var dom = parts[0];
+        if (!domainFilter || domainFilter.indexOf(dom) !== -1) {
+          var state = hass.states[id];
+          all.push({ id: id, domain: dom, name: state.attributes && state.attributes.friendly_name ? state.attributes.friendly_name : id });
+        }
+      }
+      all.sort(function (a, b) { return a.id.localeCompare(b.id); });
+      return all;
+    }
+
+    _guessEntity(cardType) {
+      var domains = this._entityDomainsForCardType(cardType);
+      if (!domains) return "";
+      var list = this._getEntities(domains);
+      if (list.length > 0) return list[0].id;
+      // fallback: any entity
+      var any = this._getEntities(null);
+      return any.length > 0 ? any[0].id : "";
+    }
+
+    _getCardDefaults(type) {
+      var defaults = { type: type };
+      switch (type) {
+        case "sensor":
+        case "gauge":
+        case "tile":
+        case "light":
+        case "climate":
+        case "cover":
+        case "fan":
+        case "lock":
+        case "vacuum":
+        case "humidifier":
+        case "water-heater":
+        case "thermostat":
+        case "alarm-panel":
+        case "media-control":
+        case "button":
+          defaults.entity = this._guessEntity(type) || "";
+          break;
+        case "button":
+          defaults.entity = this._guessEntity(type) || "";
+          defaults.name = "Run";
+          defaults.show_name = true;
+          defaults.tap_action = { action: "toggle" };
+          break;
+        case "entities":
+        case "glance":
+          defaults.entities = [];
+          var list = this._getEntities(["sensor", "binary_sensor", "light", "switch"]);
+          if (list.length) defaults.entities = list.slice(0, 5).map(function (e) { return e.id; });
+          break;
+        case "history-graph":
+          defaults.entities = [];
+          var hist = this._getEntities(["sensor", "binary_sensor"]);
+          if (hist.length) defaults.entities = hist.slice(0, 3).map(function (e) { return e.id; });
+          defaults.hours_to_show = 24;
+          break;
+        case "statistics-graph":
+          defaults.entities = [];
+          var stat = this._getEntities(["sensor"]);
+          if (stat.length) defaults.entities = stat.slice(0, 3).map(function (e) { return e.id; });
+          defaults.chart_type = "line";
+          defaults.period = "hour";
+          break;
+        case "logbook":
+          defaults.entities = [];
+          var log = this._getEntities(["sensor", "binary_sensor", "light", "switch"]);
+          if (log.length) defaults.entities = log.slice(0, 5).map(function (e) { return e.id; });
+          defaults.hours_to_show = 24;
+          break;
+        case "markdown":
+          defaults.content = "# Markdown\n\nEdit this text";
+          break;
+        case "iframe":
+          defaults.url = "https://www.home-assistant.io";
+          break;
+        case "picture":
+          defaults.image = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/Home_Assistant_Logo.svg/1200px-Home_Assistant_Logo.svg.png";
+          defaults.aspect_ratio = "16x9";
+          break;
+        case "picture-entity":
+          defaults.entity = this._guessEntity("picture-entity") || "";
+          defaults.image = "";
+          break;
+        case "picture-glance":
+          defaults.image = "";
+          defaults.entities = [];
+          var pg = this._getEntities(["light", "switch", "binary_sensor"]);
+          if (pg.length) defaults.entities = pg.slice(0, 4).map(function (e) { return e.id; });
+          break;
+        case "picture-elements":
+          defaults.image = "";
+          defaults.elements = [];
+          break;
+        case "conditional":
+          defaults.conditions = [];
+          defaults.card = { type: "tile", entity: this._guessEntity("tile") || "" };
+          break;
+        case "horizontal-stack":
+        case "vertical-stack":
+        case "grid":
+          defaults.cards = [];
+          break;
+        case "heading":
+          defaults.heading = "Section Heading";
+          defaults.subheading = "";
+          break;
+        case "map":
+          defaults.entities = [];
+          var persons = this._getEntities(["person", "device_tracker"]);
+          if (persons.length) defaults.entities = persons.slice(0, 3).map(function (e) { return e.id; });
+          break;
+      }
+      return defaults;
+    }
+
+    _showCardConfigurator(cardType, cardName, config) {
+      var self = this;
+      var root = self._container;
+
+      var overlay = document.createElement("div");
+      overlay.className = "fc-dialog-overlay";
+
+      var dialog = document.createElement("div");
+      dialog.className = "fc-dialog";
+      dialog.style.maxWidth = "720px";
+      dialog.style.padding = "22px";
+
+      var title = document.createElement("h3");
+      title.textContent = "Configure " + cardName;
+      title.style.margin = "0 0 4px 0";
+      dialog.appendChild(title);
+
+      var subtitle = document.createElement("p");
+      subtitle.textContent = "Type: " + cardType + "  \u00b7  Pick an entity, set a title, and click Add Card.";
+      subtitle.style.margin = "0 0 16px 0";
+      dialog.appendChild(subtitle);
+
+      var form = document.createElement("div");
+      form.className = "fc-configurator";
+      dialog.appendChild(form);
+
+      var rawMode = false;
+      var rawToggle = document.createElement("label");
+      rawToggle.className = "fc-raw-toggle";
+      rawToggle.innerHTML = '<input type="checkbox" style="margin:0;"> <span>Edit raw JSON</span>';
+      rawToggle.querySelector("input").onchange = function () {
+        rawMode = this.checked;
+        self._renderConfiguratorFields(form, config, cardType, previewBox, rawMode, rawToggle);
+      };
+      dialog.appendChild(rawToggle);
+
+      var previewLabel = document.createElement("div");
+      previewLabel.className = "fc-section-title";
+      previewLabel.textContent = "Preview";
+      dialog.appendChild(previewLabel);
+
+      var previewBox = document.createElement("div");
+      previewBox.className = "fc-preview-box";
+      dialog.appendChild(previewBox);
+
+      var errorBox = document.createElement("div");
+      errorBox.style.cssText = "color:var(--error-color,#db4437);font-size:13px;margin-top:8px;min-height:20px;";
+      dialog.appendChild(errorBox);
+
+      var buttons = document.createElement("div");
+      buttons.className = "fc-dialog-buttons";
+      var cancelBtn = document.createElement("button");
+      cancelBtn.className = "fc-secondary";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.onclick = function () { overlay.remove(); };
+      var okBtn = document.createElement("button");
+      okBtn.textContent = "Add Card";
+      okBtn.onclick = function () {
+        errorBox.textContent = "";
+        try {
+          if (rawMode) {
+            config = JSON.parse(form.querySelector("textarea").value);
+          }
+          if (!config || !config.type) throw new Error("Missing card type");
+          self._addItem(config);
+          overlay.remove();
+        } catch (e) {
+          errorBox.textContent = "Error: " + e.message;
+        }
+      };
+      buttons.appendChild(cancelBtn);
+      buttons.appendChild(okBtn);
+      dialog.appendChild(buttons);
+
+      overlay.appendChild(dialog);
+      root.appendChild(overlay);
+
+      self._renderConfiguratorFields(form, config, cardType, previewBox, rawMode, rawToggle);
+    }
+
+    _renderConfiguratorFields(form, config, cardType, previewBox, rawMode, rawToggle) {
+      var self = this;
+      form.innerHTML = "";
+
+      if (rawMode) {
+        var ta = document.createElement("textarea");
+        ta.value = JSON.stringify(config, null, 2);
+        ta.spellcheck = false;
+        ta.style.height = "260px";
+        ta.oninput = function () {
+          try {
+            config = JSON.parse(this.value);
+            self._updatePreview(previewBox, config);
+          } catch (e) { /* ignore while typing */ }
+        };
+        form.appendChild(ta);
+        return;
+      }
+
+      var entityDomains = this._entityDomainsForCardType(cardType);
+      var entities = this._getEntities(entityDomains);
+
+      // Title field for most cards
+      if (["entities", "glance", "history-graph", "statistics-graph", "logbook", "markdown", "iframe", "picture", "picture-entity", "picture-glance", "picture-elements", "map", "grid", "horizontal-stack", "vertical-stack"].indexOf(cardType) !== -1) {
+        var titleWrap = document.createElement("div");
+        titleWrap.className = "fc-field";
+        titleWrap.innerHTML = '<label>Title</label><input type="text" placeholder="Optional title">';
+        var titleInput = titleWrap.querySelector("input");
+        titleInput.value = config.title || "";
+        titleInput.oninput = function () {
+          if (this.value) config.title = this.value; else delete config.title;
+          self._updatePreview(previewBox, config);
+        };
+        form.appendChild(titleWrap);
+      }
+
+      // Single entity picker
+      if (entityDomains && ["sensor", "gauge", "tile", "light", "climate", "cover", "fan", "lock", "vacuum", "humidifier", "water-heater", "thermostat", "alarm-panel", "media-control", "button", "picture-entity"].indexOf(cardType) !== -1) {
+        var wrap = document.createElement("div");
+        wrap.className = "fc-field";
+        var label = entityDomains.length === 1 ? "Entity (" + entityDomains[0] + ")" : "Entity";
+        wrap.innerHTML = '<label>' + label + '</label><select><option value="">-- select entity --</option></select>';
+        var select = wrap.querySelector("select");
+        entities.forEach(function (e) {
+          var opt = document.createElement("option");
+          opt.value = e.id;
+          opt.textContent = e.name + "  (" + e.id + ")";
+          if (e.id === config.entity) opt.selected = true;
+          select.appendChild(opt);
+        });
+        if (entities.length === 0) {
+          var empty = document.createElement("div");
+          empty.className = "fc-no-entity";
+          empty.textContent = "No " + (entityDomains.join(", ")) + " entities found.";
+          wrap.appendChild(empty);
+        }
+        select.onchange = function () {
+          config.entity = this.value;
+          self._updatePreview(previewBox, config);
+        };
+        form.appendChild(wrap);
+      }
+
+      // Multi-entity picker for list-based cards
+      if (["entities", "glance", "history-graph", "statistics-graph", "logbook", "picture-glance"].indexOf(cardType) !== -1) {
+        var multiWrap = document.createElement("div");
+        multiWrap.className = "fc-field";
+        var multiLabel = cardType === "history-graph" || cardType === "statistics-graph" ? "Entities to graph" : "Entities";
+        multiWrap.innerHTML = '<label>' + multiLabel + '</label><select multiple style="min-height:120px;"></select><div class="fc-no-entity">Hold Ctrl/Cmd to select multiple</div>';
+        var multiSelect = multiWrap.querySelector("select");
+        var arr = config.entities || [];
+        entities.forEach(function (e) {
+          var opt = document.createElement("option");
+          opt.value = e.id;
+          opt.textContent = e.name + "  (" + e.id + ")";
+          if (arr.indexOf(e.id) !== -1) opt.selected = true;
+          multiSelect.appendChild(opt);
+        });
+        multiSelect.onchange = function () {
+          var selected = Array.from(this.selectedOptions).map(function (o) { return o.value; });
+          if (selected.length) config.entities = selected; else delete config.entities;
+          self._updatePreview(previewBox, config);
+        };
+        form.appendChild(multiWrap);
+      }
+
+      // Markdown content
+      if (cardType === "markdown") {
+        var mdWrap = document.createElement("div");
+        mdWrap.className = "fc-field";
+        mdWrap.innerHTML = '<label>Content</label><textarea rows="6"></textarea>';
+        var mdTa = mdWrap.querySelector("textarea");
+        mdTa.value = config.content || "";
+        mdTa.oninput = function () {
+          config.content = this.value;
+          self._updatePreview(previewBox, config);
+        };
+        form.appendChild(mdWrap);
+      }
+
+      // iFrame URL
+      if (cardType === "iframe") {
+        var urlWrap = document.createElement("div");
+        urlWrap.className = "fc-field";
+        urlWrap.innerHTML = '<label>URL</label><input type="text">';
+        var urlInput = urlWrap.querySelector("input");
+        urlInput.value = config.url || "";
+        urlInput.oninput = function () {
+          config.url = this.value;
+          self._updatePreview(previewBox, config);
+        };
+        form.appendChild(urlWrap);
+      }
+
+      // Picture URL / aspect ratio
+      if (["picture", "picture-entity", "picture-glance"].indexOf(cardType) !== -1) {
+        var imgWrap = document.createElement("div");
+        imgWrap.className = "fc-field";
+        imgWrap.innerHTML = '<label>Image URL</label><input type="text">';
+        var imgInput = imgWrap.querySelector("input");
+        imgInput.value = config.image || "";
+        imgInput.oninput = function () {
+          if (this.value) config.image = this.value; else delete config.image;
+          self._updatePreview(previewBox, config);
+        };
+        form.appendChild(imgWrap);
+      }
+
+      // Hours to show for graphs/logbook
+      if (["history-graph", "logbook"].indexOf(cardType) !== -1) {
+        var hoursWrap = document.createElement("div");
+        hoursWrap.className = "fc-field";
+        hoursWrap.innerHTML = '<label>Hours to show</label><input type="number" min="1" max="168">';
+        var hoursInput = hoursWrap.querySelector("input");
+        hoursInput.value = config.hours_to_show || 24;
+        hoursInput.oninput = function () {
+          config.hours_to_show = parseInt(this.value, 10) || 24;
+          self._updatePreview(previewBox, config);
+        };
+        form.appendChild(hoursWrap);
+      }
+
+      // Statistics period/chart type
+      if (cardType === "statistics-graph") {
+        var statWrap1 = document.createElement("div");
+        statWrap1.className = "fc-field";
+        statWrap1.innerHTML = '<label>Chart type</label><select><option value="line">Line</option><option value="bar">Bar</option></select>';
+        statWrap1.querySelector("select").value = config.chart_type || "line";
+        statWrap1.querySelector("select").onchange = function () {
+          config.chart_type = this.value;
+          self._updatePreview(previewBox, config);
+        };
+        form.appendChild(statWrap1);
+
+        var statWrap2 = document.createElement("div");
+        statWrap2.className = "fc-field";
+        statWrap2.innerHTML = '<label>Period</label><select><option value="5minute">5 minute</option><option value="hour">Hour</option><option value="day">Day</option><option value="month">Month</option></select>';
+        statWrap2.querySelector("select").value = config.period || "hour";
+        statWrap2.querySelector("select").onchange = function () {
+          config.period = this.value;
+          self._updatePreview(previewBox, config);
+        };
+        form.appendChild(statWrap2);
+      }
+
+      // Heading text
+      if (cardType === "heading") {
+        var headWrap1 = document.createElement("div");
+        headWrap1.className = "fc-field";
+        headWrap1.innerHTML = '<label>Heading</label><input type="text">';
+        var headInput = headWrap1.querySelector("input");
+        headInput.value = config.heading || "";
+        headInput.oninput = function () {
+          config.heading = this.value;
+          self._updatePreview(previewBox, config);
+        };
+        form.appendChild(headWrap1);
+
+        var headWrap2 = document.createElement("div");
+        headWrap2.className = "fc-field";
+        headWrap2.innerHTML = '<label>Subheading</label><input type="text">';
+        var subInput = headWrap2.querySelector("input");
+        subInput.value = config.subheading || "";
+        subInput.oninput = function () {
+          config.subheading = this.value;
+          self._updatePreview(previewBox, config);
+        };
+        form.appendChild(headWrap2);
+      }
+
+      // Map entities (person/device_tracker)
+      if (cardType === "map") {
+        var mapWrap = document.createElement("div");
+        mapWrap.className = "fc-field";
+        mapWrap.innerHTML = '<label>Track entities</label><select multiple style="min-height:100px;"></select><div class="fc-no-entity">Hold Ctrl/Cmd to select multiple</div>';
+        var mapSelect = mapWrap.querySelector("select");
+        var persons = this._getEntities(["person", "device_tracker"]);
+        var mapArr = config.entities || [];
+        persons.forEach(function (e) {
+          var opt = document.createElement("option");
+          opt.value = e.id;
+          opt.textContent = e.name + "  (" + e.id + ")";
+          if (mapArr.indexOf(e.id) !== -1) opt.selected = true;
+          mapSelect.appendChild(opt);
+        });
+        mapSelect.onchange = function () {
+          var selected = Array.from(this.selectedOptions).map(function (o) { return o.value; });
+          if (selected.length) config.entities = selected; else delete config.entities;
+          self._updatePreview(previewBox, config);
+        };
+        form.appendChild(mapWrap);
+      }
+
+      this._updatePreview(previewBox, config);
+    }
+
+    _updatePreview(previewBox, config) {
+      var self = this;
+      previewBox.innerHTML = "";
+      self._createCardElement(config).then(function (el) {
+        el.style.maxWidth = "100%";
+        el.style.maxHeight = "260px";
+        previewBox.appendChild(el);
+      }).catch(function (e) {
+        previewBox.innerHTML = '<div class="fc-no-entity">Preview unavailable: ' + (e.message || e) + '</div>';
+      });
+    }
+
     // ---- Add / Edit / Delete ----
 
     _openAddDialog() {
-      // Try HA native card picker first; fall back to JSON dialog
-      var self = this;
-      try {
-        self._openHACardPicker();
-      } catch (e) {
-        console.warn("[FreeCanvas] HA card picker failed, falling back to JSON:", e);
-        self._openAddDialogJSON();
-      }
+      this._openHACardPicker();
     }
 
     _openAddDialogJSON() {
