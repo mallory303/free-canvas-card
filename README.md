@@ -13,9 +13,12 @@ top handle to **rotate** by any angle. Layout persists to `localStorage`.
 - **Resize** — bottom-right handle, min 80×60px
 - **Rotate** — top handle, arbitrary angle (0–360°), hold **Shift** to snap to 15° increments
 - **Z-order** — click to select, selected card stays on top
+- **Smart card picker** — choose from built-in and custom cards, pick entities, preview before placing
+- **Per-card configurator** — entity dropdown, title, hours, chart type, etc.
+- **Raw JSON toggle** — edit the generated config directly for advanced cases
 - **Export / Import** — save and restore layouts as JSON files
 - **Auto-save** — layout persists to `localStorage` per `storage_key`
-- **Any Lovelace card** — entities, gauge, mushroom, weather, picture, etc.
+- **Any Lovelace card** — entities, gauge, mushroom, weather-radar, picture, etc.
 - **Zero dependencies** — vanilla JS, no Lit, no bundler, no npm
 
 ## Installation
@@ -55,18 +58,19 @@ height: 700                  # canvas height in pixels (default: 500)
 ### Adding cards
 
 1. Click the **✎ pencil** icon (top-right) to enter edit mode
-2. Click **+ Add Card**
-3. Paste a Lovelace card config as JSON, e.g.:
-   ```json
-   {
-     "type": "gauge",
-     "entity": "sensor.temperature",
-     "min": 0,
-     "max": 40,
-     "unit": "°C"
-   }
-   ```
-4. Click **Add Card**
+2. Click **+ Add Card** to open the smart picker
+3. Search or scroll to find the card type you want
+4. Configure the card in the dialog:
+   - Pick an entity from a filtered dropdown
+   - Set title, hours, chart type, etc. when applicable
+   - A live preview shows the result before you place it
+   - Open **View generated JSON** to edit raw config
+5. Click **Add Card**
+
+If no suitable entity exists in your Home Assistant instance for a card
+that requires one (e.g. **Thermostat** needs a `climate` entity,
+**Media Control** needs a `media_player`), the configurator will warn
+you and the card will likely show a configuration error when placed.
 
 ### Moving, resizing, rotating
 
@@ -100,6 +104,14 @@ Click **Done** to exit edit mode. Layout auto-saves on every change.
 - Home Assistant 2024.x and later
 - Works in storage-mode dashboards
 - No HACS dependency (but HACS install is supported)
+
+## Known limitations
+
+- The card cannot invoke Home Assistant's native card editor/picker dialogs.
+  HA's editor lives in private webpack/rspack chunks that external custom
+  cards cannot register, so this card uses its own picker and configurator.
+- Cards that require an entity domain you don't have (e.g. climate, media_player)
+  will show a configuration error unless a compatible entity is configured.
 
 ## License
 
