@@ -403,6 +403,11 @@
         return true;
       });
 
+      // When a custom card is picked, its Lovelace type must include the "custom:" prefix
+      allCards.forEach(function (c) {
+        c.configType = c.custom ? "custom:" + c.type : c.type;
+      });
+
       self._showCardPicker(allCards);
     }
 
@@ -448,8 +453,9 @@
             (c.custom ? '<div style="font-size:9px;color:var(--primary-color,#03a9f4);margin-top:2px;">CUSTOM</div>' : '');
           card.onclick = function () {
             overlay.remove();
-            var defaults = self._getCardDefaults(c.type);
-            self._showCardConfigurator(c.type, c.name, defaults);
+            var configType = c.configType || c.type;
+            var defaults = self._getCardDefaults(configType);
+            self._showCardConfigurator(configType, c.name, defaults);
           };
           grid.appendChild(card);
         });
@@ -479,15 +485,18 @@
     // ---- Card defaults / entity helpers ----
 
     _entityDomainsForCardType(type) {
+      var bareType = (type || "").replace(/^custom:/, "");
       var map = {
-        sensor: ["sensor", "binary_sensor"],
+        // HA sensor card only accepts these numeric domains
+        sensor: ["sensor", "counter", "input_number", "number"],
         gauge: ["sensor"],
-        tile: ["light", "switch", "sensor", "binary_sensor", "fan", "climate", "cover", "lock", "vacuum", "humidifier", "water_heater"],
+        tile: ["light", "switch", "sensor", "binary_sensor", "fan", "climate", "cover", "lock", "vacuum", "humidifier", "water_heater", "button", "script", "scene", "automation", "media_player", "person"],
         button: ["button", "script", "scene", "automation"],
-        entities: ["sensor", "binary_sensor", "light", "switch", "climate", "cover", "fan", "lock", "vacuum", "media_player"],
-        glance: ["sensor", "binary_sensor", "light", "switch", "climate", "cover", "fan", "lock"],
+        entities: ["sensor", "binary_sensor", "light", "switch", "climate", "cover", "fan", "lock", "vacuum", "media_player", "button", "script", "scene", "automation"],
+        glance: ["sensor", "binary_sensor", "light", "switch", "climate", "cover", "fan", "lock", "vacuum", "media_player"],
         "history-graph": ["sensor", "binary_sensor"],
-        logbook: ["sensor", "binary_sensor", "light", "switch"],
+        "statistics-graph": ["sensor"],
+        logbook: ["sensor", "binary_sensor", "light", "switch", "climate", "cover", "fan", "lock", "vacuum"],
         light: ["light"],
         climate: ["climate"],
         cover: ["cover"],
@@ -500,10 +509,25 @@
         thermostat: ["climate"],
         "media-control": ["media_player"],
         map: ["person", "device_tracker", "zone"],
-        "picture-entity": ["light", "switch", "sensor", "person"],
-        "picture-glance": ["light", "switch", "sensor", "binary_sensor"],
+        "picture-entity": ["light", "switch", "sensor", "person", "climate", "cover", "fan", "media_player"],
+        "picture-glance": ["light", "switch", "sensor", "binary_sensor", "climate", "cover", "fan", "lock"],
+        // Custom cards
+        "mushroom-entity-card": ["light", "switch", "sensor", "binary_sensor", "fan", "climate", "cover", "lock", "vacuum", "humidifier", "water_heater", "button", "script", "scene", "automation", "media_player", "person"],
+        "mushroom-person-card": ["person", "device_tracker"],
+        "mushroom-number-card": ["number", "input_number"],
+        "mushroom-select-card": ["select", "input_select"],
+        "mushroom-climate-card": ["climate"],
+        "mushroom-alarm-control-panel-card": ["alarm_control_panel"],
+        "mushroom-cover-card": ["cover"],
+        "mushroom-fan-card": ["fan"],
+        "mushroom-humidifier-card": ["humidifier"],
+        "mushroom-light-card": ["light"],
+        "mushroom-lock-card": ["lock"],
+        "mushroom-media-player-card": ["media_player"],
+        "mushroom-update-card": ["update"],
+        "mushroom-vacuum-card": ["vacuum"],
       };
-      return map[type] || null;
+      return map[bareType] || null;
     }
 
     _getEntities(domainFilter) {
@@ -526,6 +550,14 @@
       var domains = this._entityDomainsForCardType(cardType);
       if (!domains) return "";
       var list = this._getEntities(domains);
+      // Prefer numeric sensors for sensor/gauge/number cards
+      if (cardType === "sensor" || cardType === "gauge" || cardType === "mushroom-number-card" || (cardType || "").replace(/^custom:/, "") === "mushroom-number-card") {
+        var numeric = list.filter(function (e) {
+          var state = this._hass.states[e.id];
+          return state && !isNaN(Number(state.state));
+        }.bind(this));
+        if (numeric.length > 0) return numeric[0].id;
+      }
       if (list.length > 0) return list[0].id;
       // fallback: any entity
       var any = this._getEntities(null);
@@ -533,8 +565,10 @@
     }
 
     _getCardDefaults(type) {
+      // Strip custom: prefix for internal matching, but keep it in the returned type
+      var bareType = type.replace(/^custom:/, "");
       var defaults = { type: type };
-      switch (type) {
+      switch (bareType) {
         case "sensor":
         case "gauge":
         case "tile":
@@ -617,12 +651,74 @@
           break;
         case "heading":
           defaults.heading = "Section Heading";
-          defaults.subheading = "";
+          defaults.icon = "mdi:fridge";
           break;
         case "map":
           defaults.entities = [];
           var persons = this._getEntities(["person", "device_tracker"]);
           if (persons.length) defaults.entities = persons.slice(0, 3).map(function (e) { return e.id; });
+          break;
+        case "weather-radar-card":
+          defaults.data_source = "RainViewer";
+          defaults.zoom_level = 7;
+          defaults.height = "400px";
+          defaults.width = "100%";
+          break;
+        case "mushroom-entity-card":
+          defaults.entity = this._guessEntity("tile") || "";
+          break;
+        case "mushroom-person-card":
+          defaults.entity = this._guessEntity("map") || "";
+          break;
+        case "mushroom-number-card":
+          defaults.entity = this._guessEntity("number") || "";
+          break;
+        case "mushroom-select-card":
+          defaults.entity = this._guessEntity("select") || "";
+          break;
+        case "mushroom-chips-card":
+          defaults.chips = [];
+          break;
+        case "mushroom-title-card":
+          defaults.title = "Title";
+          defaults.subtitle = "Subtitle";
+          break;
+        case "mushroom-climate-card":
+          defaults.entity = this._guessEntity("climate") || "";
+          break;
+        case "mushroom-alarm-control-panel-card":
+          defaults.entity = this._guessEntity("alarm-panel") || "";
+          break;
+        case "mushroom-cover-card":
+          defaults.entity = this._guessEntity("cover") || "";
+          break;
+        case "mushroom-fan-card":
+          defaults.entity = this._guessEntity("fan") || "";
+          break;
+        case "mushroom-humidifier-card":
+          defaults.entity = this._guessEntity("humidifier") || "";
+          break;
+        case "mushroom-light-card":
+          defaults.entity = this._guessEntity("light") || "";
+          break;
+        case "mushroom-lock-card":
+          defaults.entity = this._guessEntity("lock") || "";
+          break;
+        case "mushroom-media-player-card":
+          defaults.entity = this._guessEntity("media-control") || "";
+          break;
+        case "mushroom-template-card":
+          defaults.primary = "Hello";
+          defaults.secondary = "";
+          defaults.icon = "mdi:home";
+          break;
+        case "mushroom-update-card":
+          defaults.entity = this._guessEntity("update") || "";
+          break;
+        case "mushroom-vacuum-card":
+          defaults.entity = this._guessEntity("vacuum") || "";
+          break;
+        case "mushroom-empty-card":
           break;
       }
       return defaults;
@@ -677,6 +773,12 @@
       errorBox.style.cssText = "color:var(--error-color,#db4437);font-size:13px;margin-top:8px;min-height:20px;";
       dialog.appendChild(errorBox);
 
+      var configBox = document.createElement("details");
+      configBox.style.cssText = "margin-top:12px;font-size:12px;color:var(--secondary-text-color,#888);";
+      configBox.innerHTML = '<summary>View generated JSON</summary><pre style="background:var(--secondary-background-color,#111);padding:8px;border-radius:6px;overflow:auto;max-height:160px;white-space:pre-wrap;"></pre>';
+      var configPre = configBox.querySelector("pre");
+      dialog.appendChild(configBox);
+
       var buttons = document.createElement("div");
       buttons.className = "fc-dialog-buttons";
       var cancelBtn = document.createElement("button");
@@ -692,6 +794,13 @@
             config = JSON.parse(form.querySelector("textarea").value);
           }
           if (!config || !config.type) throw new Error("Missing card type");
+          // Warn if entity required but missing
+          var bareType = (config.type || "").replace(/^custom:/, "");
+          var required = (config.entity === undefined) ? false : self._entityDomainsForCardType(config.type);
+          if (required && !config.entity) {
+            errorBox.textContent = "Warning: no entity selected. The card may show an error or blank state.";
+            return;
+          }
           self._addItem(config);
           overlay.remove();
         } catch (e) {
@@ -727,8 +836,10 @@
         return;
       }
 
+      var bareType = (cardType || "").replace(/^custom:/, "");
       var entityDomains = this._entityDomainsForCardType(cardType);
       var entities = this._getEntities(entityDomains);
+      var hasFields = false;
 
       // Title field for most cards
       if (["entities", "glance", "history-graph", "statistics-graph", "logbook", "markdown", "iframe", "picture", "picture-entity", "picture-glance", "picture-elements", "map", "grid", "horizontal-stack", "vertical-stack"].indexOf(cardType) !== -1) {
@@ -742,10 +853,20 @@
           self._updatePreview(previewBox, config);
         };
         form.appendChild(titleWrap);
+        hasFields = true;
       }
 
-      // Single entity picker
-      if (entityDomains && ["sensor", "gauge", "tile", "light", "climate", "cover", "fan", "lock", "vacuum", "humidifier", "water-heater", "thermostat", "alarm-panel", "media-control", "button", "picture-entity"].indexOf(cardType) !== -1) {
+      // Single entity picker for built-in and custom cards
+      var singleEntityTypes = ["sensor", "gauge", "tile", "light", "climate", "cover", "fan", "lock", "vacuum", "humidifier", "water-heater", "thermostat", "alarm-panel", "media-control", "button", "picture-entity"];
+      var isMushroomSingle = bareType.indexOf("mushroom-") === 0 &&
+        bareType.indexOf("-chips-card") === -1 &&
+        bareType.indexOf("-title-card") === -1 &&
+        bareType.indexOf("-empty-card") === -1 &&
+        bareType.indexOf("-template-card") === -1;
+      var needsEntity = entityDomains && (singleEntityTypes.indexOf(bareType) !== -1 ||
+        (config.entity !== undefined) || isMushroomSingle);
+
+      if (needsEntity) {
         var wrap = document.createElement("div");
         wrap.className = "fc-field";
         var label = entityDomains.length === 1 ? "Entity (" + entityDomains[0] + ")" : "Entity";
@@ -769,6 +890,7 @@
           self._updatePreview(previewBox, config);
         };
         form.appendChild(wrap);
+        hasFields = true;
       }
 
       // Multi-entity picker for list-based cards
@@ -792,6 +914,7 @@
           self._updatePreview(previewBox, config);
         };
         form.appendChild(multiWrap);
+        hasFields = true;
       }
 
       // Markdown content
@@ -806,6 +929,7 @@
           self._updatePreview(previewBox, config);
         };
         form.appendChild(mdWrap);
+        hasFields = true;
       }
 
       // iFrame URL
@@ -820,6 +944,7 @@
           self._updatePreview(previewBox, config);
         };
         form.appendChild(urlWrap);
+        hasFields = true;
       }
 
       // Picture URL / aspect ratio
@@ -834,6 +959,7 @@
           self._updatePreview(previewBox, config);
         };
         form.appendChild(imgWrap);
+        hasFields = true;
       }
 
       // Hours to show for graphs/logbook
@@ -848,6 +974,7 @@
           self._updatePreview(previewBox, config);
         };
         form.appendChild(hoursWrap);
+        hasFields = true;
       }
 
       // Statistics period/chart type
@@ -871,6 +998,7 @@
           self._updatePreview(previewBox, config);
         };
         form.appendChild(statWrap2);
+        hasFields = true;
       }
 
       // Heading text
@@ -888,14 +1016,15 @@
 
         var headWrap2 = document.createElement("div");
         headWrap2.className = "fc-field";
-        headWrap2.innerHTML = '<label>Subheading</label><input type="text">';
+        headWrap2.innerHTML = '<label>Icon (MDI)</label><input type="text">';
         var subInput = headWrap2.querySelector("input");
-        subInput.value = config.subheading || "";
+        subInput.value = config.icon || "";
         subInput.oninput = function () {
-          config.subheading = this.value;
+          config.icon = this.value;
           self._updatePreview(previewBox, config);
         };
         form.appendChild(headWrap2);
+        hasFields = true;
       }
 
       // Map entities (person/device_tracker)
@@ -919,6 +1048,56 @@
           self._updatePreview(previewBox, config);
         };
         form.appendChild(mapWrap);
+        hasFields = true;
+      }
+
+      // Mushroom title
+      if (bareType === "mushroom-title-card") {
+        var tWrap1 = document.createElement("div");
+        tWrap1.className = "fc-field";
+        tWrap1.innerHTML = '<label>Title</label><input type="text">';
+        tWrap1.querySelector("input").value = config.title || "";
+        tWrap1.querySelector("input").oninput = function () { config.title = this.value; self._updatePreview(previewBox, config); };
+        form.appendChild(tWrap1);
+        var tWrap2 = document.createElement("div");
+        tWrap2.className = "fc-field";
+        tWrap2.innerHTML = '<label>Subtitle</label><input type="text">';
+        tWrap2.querySelector("input").value = config.subtitle || "";
+        tWrap2.querySelector("input").oninput = function () { config.subtitle = this.value; self._updatePreview(previewBox, config); };
+        form.appendChild(tWrap2);
+        hasFields = true;
+      }
+
+      // Mushroom template
+      if (bareType === "mushroom-template-card") {
+        var tpl1 = document.createElement("div");
+        tpl1.className = "fc-field";
+        tpl1.innerHTML = '<label>Primary</label><input type="text">';
+        tpl1.querySelector("input").value = config.primary || "";
+        tpl1.querySelector("input").oninput = function () { config.primary = this.value; self._updatePreview(previewBox, config); };
+        form.appendChild(tpl1);
+        var tpl2 = document.createElement("div");
+        tpl2.className = "fc-field";
+        tpl2.innerHTML = '<label>Secondary</label><input type="text">';
+        tpl2.querySelector("input").value = config.secondary || "";
+        tpl2.querySelector("input").oninput = function () { config.secondary = this.value; self._updatePreview(previewBox, config); };
+        form.appendChild(tpl2);
+        var tpl3 = document.createElement("div");
+        tpl3.className = "fc-field";
+        tpl3.innerHTML = '<label>Icon (MDI)</label><input type="text">';
+        tpl3.querySelector("input").value = config.icon || "";
+        tpl3.querySelector("input").oninput = function () { config.icon = this.value; self._updatePreview(previewBox, config); };
+        form.appendChild(tpl3);
+        hasFields = true;
+      }
+
+      // Fallback message for cards with no quick options
+      if (!hasFields) {
+        var msg = document.createElement("div");
+        msg.className = "fc-no-entity";
+        msg.style.margin = "12px 0";
+        msg.innerHTML = 'No quick options for this card type. Switch on <b>Edit raw JSON</b> to configure it manually.';
+        form.appendChild(msg);
       }
 
       this._updatePreview(previewBox, config);
