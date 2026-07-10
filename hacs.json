@@ -1,0 +1,7 @@
+{
+  "name": "Free Canvas Card",
+  "content_in_root": true,
+  "render_readme": true,
+  "domains": ["lovelace"],
+  "iot_class": "Local Push"
+}
